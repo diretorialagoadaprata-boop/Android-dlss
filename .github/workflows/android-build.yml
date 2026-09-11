@@ -94,7 +94,7 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm || true
 
-      - name: Install and launch on Android emulator
+      - name: End-to-end MediaProjection processing test
         uses: reactivecircus/android-emulator-runner@v2.38.0
         with:
           api-level: 35
@@ -103,14 +103,16 @@ jobs:
           profile: pixel_6
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           disable-animations: true
-          script: |
-            adb install -r work/project/app/build/outputs/apk/debug/app-debug.apk
-            adb shell am force-stop com.lm.neuralframe
-            adb shell am start -W -n com.lm.neuralframe/.MainActivity > launch.txt
-            cat launch.txt
-            grep -Eq 'Status: ok|Status: timeout' launch.txt
-            adb shell pidof com.lm.neuralframe
-            adb shell dumpsys package com.lm.neuralframe | grep -q 'versionName'
+          script: bash ci/emulator_processing_test.sh
+
+      - name: Upload processing log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-dlss-processing-log
+          path: neuralframe-render.log
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
