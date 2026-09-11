@@ -14,64 +14,87 @@ adb shell am start -W -n "$ACTIVITY"
 sleep 2
 
 python3 - <<'PY'
-import re, subprocess, time
+import re, subprocess, time, xml.etree.ElementTree as ET
 
 def dump():
     subprocess.run(['adb','shell','uiautomator','dump','/sdcard/window.xml'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
     return subprocess.check_output(['adb','shell','cat','/sdcard/window.xml'], text=True, errors='ignore')
 
+def center(bounds):
+    m=re.fullmatch(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', bounds or '')
+    if not m:
+        return None
+    x1,y1,x2,y2=map(int,m.groups())
+    return (x1+x2)//2,(y1+y2)//2
+
+def find_node(texts):
+    xml=dump()
+    try:
+        root=ET.fromstring(xml)
+    except ET.ParseError:
+        return None, xml
+    wanted={t.casefold():t for t in texts}
+    for node in root.iter('node'):
+        for key in ('text','content-desc'):
+            value=(node.attrib.get(key) or '').strip()
+            if value.casefold() in wanted:
+                pt=center(node.attrib.get('bounds'))
+                if pt:
+                    return (wanted[value.casefold()], pt), xml
+    return None, xml
+
 def tap_text(texts, timeout=15, required=True):
     deadline=time.time()+timeout
+    last_xml=''
     while time.time()<deadline:
-        xml=dump()
-        for text in texts:
-            patterns=[
-                rf'text="{re.escape(text)}"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"',
-                rf'content-desc="{re.escape(text)}"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"'
-            ]
-            for pat in patterns:
-                m=re.search(pat, xml, re.I)
-                if m:
-                    x=(int(m.group(1))+int(m.group(3)))//2
-                    y=(int(m.group(2))+int(m.group(4)))//2
-                    subprocess.run(['adb','shell','input','tap',str(x),str(y)], check=True)
-                    return text
+        found,last_xml=find_node(texts)
+        if found:
+            label,(x,y)=found
+            subprocess.run(['adb','shell','input','tap',str(x),str(y)], check=True)
+            return label
         time.sleep(0.4)
     if required:
-        print('UI XML at timeout:\n', dump())
+        print('UI XML at timeout:\n', last_xml or dump())
         raise SystemExit('Could not find any UI text: '+repr(texts))
     return None
 
 print('Tapped:', tap_text(['INICIAR PROCESSAMENTO']))
 time.sleep(1)
 
-# Android 14 QPR2+/15 defaults to sharing a single app. Open the spinner first,
-# then deliberately select the entire virtual display for this automated CI test.
-current = tap_text(['A single app','Um único app','Um app','Uma aplicação'], timeout=5, required=False)
+current = tap_text(['A single app','Um único app','Um app','Uma aplicação'], timeout=8, required=False)
 if current:
     print('Opened share mode:', current)
-    time.sleep(0.5)
-    print('Selected:', tap_text(['Entire screen','Full screen','Tela inteira','Ecrã inteiro'], timeout=8))
-    time.sleep(0.5)
+    time.sleep(0.8)
+    print('Selected:', tap_text(['Entire screen','Full screen','Tela inteira','Ecrã inteiro'], timeout=10))
+    time.sleep(0.8)
 else:
-    # Some versions expose the full-screen option directly.
-    full = tap_text(['Entire screen','Full screen','Tela inteira','Ecrã inteiro'], timeout=4, required=False)
+    full = tap_text(['Entire screen','Full screen','Tela inteira','Ecrã inteiro'], timeout=5, required=False)
     if full:
         print('Selected:', full)
-        time.sleep(0.5)
+        time.sleep(0.8)
 
 print('Tapped:', tap_text(['Start now','Share screen','Start','Compartilhar tela','Iniciar agora','Começar agora'], timeout=15))
 PY
 
-# Generate visible motion after consent so MediaProjection continuously receives changed frames.
-for i in $(seq 1 12); do
-  adb shell input swipe 900 1200 180 1200 180 >/dev/null 2>&1 || true
-  adb shell input swipe 180 1200 900 1200 180 >/dev/null 2>&1 || true
-  sleep 0.25
+# Give onActivityResult enough time to start the foreground service and create the overlay.
+sleep 3
+
+# Generate visible motion so MediaProjection delivers multiple changing frames.
+for i in $(seq 1 16); do
+  adb shell input swipe 900 1200 180 1200 160 >/dev/null 2>&1 || true
+  adb shell input swipe 180 1200 900 1200 160 >/dev/null 2>&1 || true
+  sleep 0.20
 done
 
-sleep 5
-adb logcat -d -s NeuralFrame:I '*:S' | tee neuralframe-render.log
+sleep 6
+{
+  echo '=== NeuralFrame log ==='
+  adb logcat -d -s NeuralFrame:I '*:S' || true
+  echo '=== Process ==='
+  adb shell pidof "$PKG" || true
+  echo '=== Service ==='
+  adb shell dumpsys activity services "$PKG" | head -n 160 || true
+} | tee neuralframe-render.log
 
 grep -E 'render_fps=[0-9]+\.[0-9]+.*history=true' neuralframe-render.log
 adb shell pidof "$PKG"
