@@ -29,6 +29,24 @@ jobs:
           test -f work/project/settings.gradle.kts
           test -f work/project/app/build.gradle.kts
 
+      - name: Apply Android renderer compatibility patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILE="work/project/app/src/main/java/com/lm/neuralframe/ProjectionRenderer.java"
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("work/project/app/src/main/java/com/lm/neuralframe/ProjectionRenderer.java")
+          s = p.read_text()
+          old = "public void onSurfaceCreated(javax.microedition.khronos.egl.EGLConfig config)"
+          new = "public void onSurfaceCreated(javax.microedition.khronos.opengles.GL10 gl, javax.microedition.khronos.egl.EGLConfig config)"
+          if old in s:
+              s = s.replace(old, new)
+              p.write_text(s)
+          if new not in p.read_text():
+              raise SystemExit("renderer patch did not apply")
+          PY
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
