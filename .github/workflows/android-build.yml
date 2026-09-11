@@ -104,11 +104,10 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           disable-animations: true
           script: |
-            set -e
-            APK="work/project/app/build/outputs/apk/debug/app-debug.apk"
-            adb install -r "$APK"
+            adb install -r work/project/app/build/outputs/apk/debug/app-debug.apk
             adb shell am force-stop com.lm.neuralframe
-            adb shell am start -W -n com.lm.neuralframe/.MainActivity | tee launch.txt
+            adb shell am start -W -n com.lm.neuralframe/.MainActivity > launch.txt
+            cat launch.txt
             grep -Eq 'Status: ok|Status: timeout' launch.txt
             adb shell pidof com.lm.neuralframe
             adb shell dumpsys package com.lm.neuralframe | grep -q 'versionName'
