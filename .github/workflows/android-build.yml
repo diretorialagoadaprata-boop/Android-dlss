@@ -41,8 +41,17 @@ jobs:
           new = "public void onSurfaceCreated(javax.microedition.khronos.opengles.GL10 gl, javax.microedition.khronos.egl.EGLConfig config)"
           if old in s:
               s = s.replace(old, new)
-              p.write_text(s)
-          if new not in p.read_text():
+          # Temporal confidence/residual checks already reject stale/mismatched history.
+          # Keep history across ordinary dropped frames and reset only after a long stall.
+          if "MAX_HISTORY_GAP_NS" not in s:
+              s = s.replace(
+                  "private static final float FLOW_SEARCH_PIXELS = 6.0f;",
+                  "private static final float FLOW_SEARCH_PIXELS = 6.0f;\n    private static final long MAX_HISTORY_GAP_NS = 5_000_000_000L;"
+              )
+          s = s.replace("delta > 250_000_000L", "delta > MAX_HISTORY_GAP_NS")
+          p.write_text(s)
+          check = p.read_text()
+          if new not in check or "MAX_HISTORY_GAP_NS" not in check or "delta > MAX_HISTORY_GAP_NS" not in check:
               raise SystemExit("renderer patch did not apply")
           PY
 
