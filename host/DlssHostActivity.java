@@ -1,8 +1,10 @@
 package com.winlator;
 
 import android.app.Activity;
+import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
+import android.media.projection.MediaProjectionManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
@@ -15,6 +17,7 @@ import android.widget.Toast;
 
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.content.ContextCompat;
 
 import com.winlator.container.Container;
 import com.winlator.container.ContainerManager;
@@ -35,17 +38,25 @@ import java.util.zip.ZipInputStream;
 
 /**
  * Android host for the user-supplied DLSS5ForAll Windows package.
- * The APK intentionally does not bundle NVIDIA/DLSS proprietary binaries.
- * The user imports their own ZIP at runtime; Winlator provides Wine/Box64/DXVK.
+ *
+ * The proprietary NVIDIA/ReShade pieces are never bundled. The user imports the package
+ * they already own. Android MediaProjection replaces Windows Graphics Capture only at the
+ * capture boundary; AndroidFramePresenter.exe then creates the same kind of D3D11 Present
+ * surface that the original ReShade/DLSS5 chain expects.
  */
 public final class DlssHostActivity extends AppCompatActivity {
     private static final int REQ_PACKAGE = 5010;
+    private static final int REQ_CAPTURE = 5011;
     private static final String CONTAINER_NAME = "Android DLSS Host";
     private static final String INSTALL_DIR = "DLSS5ForAll";
+    private static final String BRIDGE_EXE = "AndroidFramePresenter.exe";
+    private static final String FRAME_FILE = "android-frame.bin";
 
     private final Handler handler = new Handler();
     private TextView status;
     private Button importButton;
+    private Button captureButton;
+    private Button bridgeButton;
     private Button launchButton;
     private Button diagnosticsButton;
     private Container container;
@@ -62,7 +73,7 @@ public final class DlssHostActivity extends AppCompatActivity {
         ScrollView scroll = new ScrollView(this);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(42, 42, 42, 42);
+        root.setPadding(42, 42, 42, 72);
         root.setGravity(Gravity.CENTER_HORIZONTAL);
         root.setBackgroundColor(Color.rgb(12, 14, 18));
         scroll.addView(root);
@@ -75,38 +86,35 @@ public final class DlssHostActivity extends AppCompatActivity {
         root.addView(title, new LinearLayout.LayoutParams(-1, -2));
 
         TextView info = new TextView(this);
-        info.setText("Host experimental do DLSS5ForAll para Android.\n\n" +
-                "Esta versão preserva o executável Windows e a lógica original dentro de Wine/Box64. " +
-                "Por motivos de licença, o APK não inclui nvngx_dlssnr.dll, ReShade nem outros binários do pacote: " +
-                "selecione o ZIP DLSS5ForAll-Portable que você já possui.\n\n" +
-                "Primeiro objetivo: executar a cadeia original e registrar exatamente o que funciona e onde o backend NVIDIA para no Android.");
+        info.setText("Port experimental do DLSS5ForAll para Android.\n\n" +
+                "O app mantém a cadeia Windows/ReShade/DLSS5 do pacote original, mas troca a captura WGC por MediaProjection. " +
+                "Os frames Android entram no Wine por um presenter D3D11 aberto e auditável.\n\n" +
+                "O APK não inclui nvngx_dlssnr.dll, nvngx_dlss.dll, ReShade ou outros binários proprietários: importe o ZIP que você já possui.");
         info.setTextColor(Color.LTGRAY);
         info.setTextSize(16f);
         LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(-1, -2);
         ip.setMargins(0, 28, 0, 28);
         root.addView(info, ip);
 
-        importButton = new Button(this);
-        importButton.setText("IMPORTAR DLSS5FORALL-PORTABLE.ZIP");
+        importButton = addButton(root, "1. IMPORTAR DLSS5FORALL-PORTABLE.ZIP");
         importButton.setEnabled(false);
         importButton.setOnClickListener(v -> choosePackage());
-        root.addView(importButton, new LinearLayout.LayoutParams(-1, -2));
 
-        launchButton = new Button(this);
-        launchButton.setText("EXECUTAR PROGRAMA WINDOWS");
+        captureButton = addButton(root, "2. ATIVAR CAPTURA DO ANDROID");
+        captureButton.setEnabled(false);
+        captureButton.setOnClickListener(v -> requestAndroidCapture());
+
+        bridgeButton = addButton(root, "3. ABRIR CAPTURA NA CADEIA DLSS5");
+        bridgeButton.setEnabled(false);
+        bridgeButton.setOnClickListener(v -> launchAndroidBridge());
+
+        launchButton = addButton(root, "TESTAR DLSS5FORALL.EXE ORIGINAL");
         launchButton.setEnabled(false);
         launchButton.setOnClickListener(v -> launchWindowsProgram());
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
-        lp.setMargins(0, 14, 0, 0);
-        root.addView(launchButton, lp);
 
-        diagnosticsButton = new Button(this);
-        diagnosticsButton.setText("VER DIAGNÓSTICO");
+        diagnosticsButton = addButton(root, "VER DIAGNÓSTICO");
         diagnosticsButton.setEnabled(false);
         diagnosticsButton.setOnClickListener(v -> showDiagnostics());
-        LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(-1, -2);
-        dp.setMargins(0, 14, 0, 0);
-        root.addView(diagnosticsButton, dp);
 
         status = new TextView(this);
         status.setText("Preparando Wine/Box64…");
@@ -118,6 +126,15 @@ public final class DlssHostActivity extends AppCompatActivity {
         root.addView(status, sp);
 
         setContentView(scroll);
+    }
+
+    private Button addButton(LinearLayout root, String text) {
+        Button b = new Button(this);
+        b.setText(text);
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, -2);
+        p.setMargins(0, root.getChildCount() > 2 ? 14 : 0, 0, 0);
+        root.addView(b, p);
+        return b;
     }
 
     private void prepareRuntime() {
@@ -181,11 +198,26 @@ public final class DlssHostActivity extends AppCompatActivity {
         packageDir = new File(container.getRootDir(), ".wine/drive_c/" + INSTALL_DIR);
         File exe = new File(packageDir, "DLSS5ForAll.exe");
         importButton.setEnabled(true);
-        launchButton.setEnabled(exe.isFile());
-        diagnosticsButton.setEnabled(packageDir.isDirectory());
-        status.setText(exe.isFile()
-                ? "Pacote encontrado. Pronto para executar a versão Windows."
-                : "Runtime pronto. Agora selecione o ZIP original do DLSS5ForAll.");
+        if (exe.isFile()) {
+            try {
+                installBridgeBinary();
+                enablePackageActions();
+                status.setText("Runtime e pacote encontrados. A ponte Android está pronta para teste.");
+            } catch (Exception e) {
+                status.setText("Pacote encontrado, mas a ponte não pôde ser instalada: " + e.getMessage());
+                launchButton.setEnabled(true);
+                diagnosticsButton.setEnabled(true);
+            }
+        } else {
+            status.setText("Runtime pronto. Agora selecione o ZIP original do DLSS5ForAll.");
+        }
+    }
+
+    private void enablePackageActions() {
+        captureButton.setEnabled(true);
+        bridgeButton.setEnabled(new File(packageDir, BRIDGE_EXE).isFile());
+        launchButton.setEnabled(new File(packageDir, "DLSS5ForAll.exe").isFile());
+        diagnosticsButton.setEnabled(true);
     }
 
     private void choosePackage() {
@@ -194,6 +226,15 @@ public final class DlssHostActivity extends AppCompatActivity {
         i.setType("application/zip");
         i.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"application/zip", "application/octet-stream", "application/x-zip-compressed"});
         startActivityForResult(i, REQ_PACKAGE);
+    }
+
+    private void requestAndroidCapture() {
+        if (packageDir == null || !new File(packageDir, BRIDGE_EXE).isFile()) {
+            Toast.makeText(this, "Importe o pacote primeiro.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        MediaProjectionManager mpm = (MediaProjectionManager)getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+        startActivityForResult(mpm.createScreenCaptureIntent(), REQ_CAPTURE);
     }
 
     @Override
@@ -206,12 +247,29 @@ public final class DlssHostActivity extends AppCompatActivity {
             }
             catch (Exception ignored) {}
             importPackage(uri);
+            return;
+        }
+
+        if (requestCode == REQ_CAPTURE) {
+            if (resultCode != Activity.RESULT_OK || data == null) {
+                status.setText("Captura Android não autorizada.");
+                return;
+            }
+            Intent svc = new Intent(this, AndroidFrameBridgeService.class);
+            svc.putExtra(AndroidFrameBridgeService.EXTRA_RESULT_CODE, resultCode);
+            svc.putExtra(AndroidFrameBridgeService.EXTRA_RESULT_DATA, data);
+            svc.putExtra(AndroidFrameBridgeService.EXTRA_FRAME_PATH, new File(packageDir, FRAME_FILE).getAbsolutePath());
+            ContextCompat.startForegroundService(this, svc);
+            status.setText("Captura Android ativa. Agora abra a ponte D3D11 para alimentar a cadeia original.");
+            bridgeButton.setEnabled(true);
         }
     }
 
     private void importPackage(Uri uri) {
         if (container == null) return;
         importButton.setEnabled(false);
+        captureButton.setEnabled(false);
+        bridgeButton.setEnabled(false);
         launchButton.setEnabled(false);
         status.setText("Extraindo o pacote original para o contêiner Windows…");
 
@@ -251,6 +309,7 @@ public final class DlssHostActivity extends AppCompatActivity {
 
                 File exe = new File(packageDir, "DLSS5ForAll.exe");
                 if (!exe.isFile()) throw new Exception("DLSS5ForAll.exe não foi encontrado na raiz do ZIP");
+                installBridgeBinary();
             }
             catch (Exception e) {
                 error = e.getClass().getSimpleName() + ": " + e.getMessage();
@@ -260,15 +319,40 @@ public final class DlssHostActivity extends AppCompatActivity {
             runOnUiThread(() -> {
                 importButton.setEnabled(true);
                 if (result == null) {
-                    launchButton.setEnabled(true);
-                    diagnosticsButton.setEnabled(true);
-                    status.setText("Importação concluída. O programa Windows está pronto para o primeiro teste.");
+                    enablePackageActions();
+                    status.setText("Importação concluída. A cadeia original foi preservada e a ponte Android foi instalada ao lado dela.");
                 }
                 else {
                     status.setText("Falha ao importar: " + result);
                 }
             });
         });
+    }
+
+    private void installBridgeBinary() throws Exception {
+        if (!packageDir.isDirectory() && !packageDir.mkdirs()) throw new Exception("não foi possível criar a pasta do pacote");
+        File out = new File(packageDir, BRIDGE_EXE);
+        try (InputStream in = getAssets().open("android-frame-presenter.exe");
+             BufferedOutputStream dst = new BufferedOutputStream(new FileOutputStream(out))) {
+            byte[] b = new byte[128 * 1024];
+            int n;
+            while ((n = in.read(b)) > 0) dst.write(b, 0, n);
+        }
+        if (!out.isFile() || out.length() < 4096) throw new Exception("AndroidFramePresenter.exe inválido");
+    }
+
+    private void launchAndroidBridge() {
+        if (container == null || packageDir == null) return;
+        File exe = new File(packageDir, BRIDGE_EXE);
+        if (!exe.isFile()) {
+            Toast.makeText(this, "A ponte D3D11 não foi instalada.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        status.setText("Abrindo presenter D3D11. ReShade/DLSS5 do seu pacote será carregado no mesmo processo se for compatível com Wine/DXVK.");
+        Intent i = new Intent(this, XServerDisplayActivity.class);
+        i.putExtra("container_id", container.id);
+        i.putExtra("exec_path", exe.getAbsolutePath());
+        startActivity(i);
     }
 
     private void launchWindowsProgram() {
@@ -279,7 +363,7 @@ public final class DlssHostActivity extends AppCompatActivity {
             return;
         }
 
-        status.setText("Iniciando DLSS5ForAll.exe em Wine/Box64…");
+        status.setText("Iniciando DLSS5ForAll.exe original em Wine/Box64…");
         Intent i = new Intent(this, XServerDisplayActivity.class);
         i.putExtra("container_id", container.id);
         i.putExtra("exec_path", exe.getAbsolutePath());
@@ -288,23 +372,40 @@ public final class DlssHostActivity extends AppCompatActivity {
 
     private void showDiagnostics() {
         if (packageDir == null) return;
+        StringBuilder text = new StringBuilder();
+        text.append("===== COMPONENTES =====\n");
+        String[] components = {
+                "DLSS5ForAll.exe", BRIDGE_EXE, "dxgi.dll", "nvngx_dlss.dll", "nvngx_dlssnr.dll",
+                "dlss5-feed.addon64", "renodx-dlss5.addon64", FRAME_FILE
+        };
+        for (String name : components) {
+            File f = new File(packageDir, name);
+            text.append(f.isFile() ? "[OK] " : "[--] ").append(name);
+            if (f.isFile()) text.append("  ").append(f.length()).append(" bytes");
+            text.append('\n');
+        }
+
         File[] candidates = new File[]{
-                new File(packageDir, "bin/dlss5forall.log"),
+                new File(packageDir, "android-frame-presenter.log"),
+                new File(packageDir, "ReShade.log"),
+                new File(packageDir, "dlss5-feed.log"),
+                new File(packageDir, "dlss5forall.log"),
                 new File(packageDir, "bin/ReShade.log"),
                 new File(packageDir, "bin/dlss5-feed.log"),
-                new File(packageDir, "dlss5forall.log")
+                new File(packageDir, "bin/dlss5forall.log")
         };
-        StringBuilder text = new StringBuilder();
         for (File f : candidates) {
             if (!f.isFile()) continue;
             text.append("\n===== ").append(f.getName()).append(" =====\n");
             String s = FileUtils.readString(f);
             if (s != null) {
-                int from = Math.max(0, s.length() - 12000);
+                int from = Math.max(0, s.length() - 16000);
                 text.append(s.substring(from)).append('\n');
             }
         }
-        if (text.length() == 0) text.append("Ainda não há logs do programa. Execute-o pelo menos uma vez.");
+
+        text.append("\n===== NOTA DE COMPATIBILIDADE =====\n")
+                .append("A captura Android e o presenter podem funcionar sem GPU NVIDIA. O backend NGX/DLSS Neural Rendering verdadeiro, porém, ainda depende de uma GPU/driver NVIDIA compatível. Este diagnóstico serve para localizar exatamente onde a cadeia para no Android.\n");
 
         Intent i = new Intent(this, DlssLogActivity.class);
         i.putExtra("log_text", text.toString());
