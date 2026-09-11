@@ -76,11 +76,32 @@ jobs:
           chmod +x gradlew
           ./gradlew --no-daemon :app:assembleDebug
 
+      - name: Sign APK with stable development key
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
+          INPUT="winlator/app/build/outputs/apk/debug/app-debug.apk"
+          ALIGNED="winlator/app/build/outputs/apk/debug/app-aligned.apk"
+          OUTPUT="winlator/app/build/outputs/apk/debug/Android-DLSS-Host-0.2.2-compat.apk"
+          base64 -d host/android-dlss-dev-keystore.b64 > /tmp/android-dlss-dev.p12
+          "$BUILD_TOOLS/zipalign" -f -p 4 "$INPUT" "$ALIGNED"
+          "$BUILD_TOOLS/apksigner" sign \
+            --ks /tmp/android-dlss-dev.p12 \
+            --ks-type PKCS12 \
+            --ks-key-alias androiddlss \
+            --ks-pass pass:androiddlss \
+            --key-pass pass:androiddlss \
+            --out "$OUTPUT" \
+            "$ALIGNED"
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$OUTPUT" | tee apk-signature.txt
+          rm -f /tmp/android-dlss-dev.p12
+
       - name: Verify APK and bridge payload
         shell: bash
         run: |
           set -euo pipefail
-          APK="winlator/app/build/outputs/apk/debug/app-debug.apk"
+          APK="winlator/app/build/outputs/apk/debug/Android-DLSS-Host-0.2.2-compat.apk"
           test -s "$APK"
           unzip -t "$APK" >/dev/null
           unzip -l "$APK" | tee apk-files.txt
@@ -94,18 +115,19 @@ jobs:
           cat <<'EOF'
           Build-time validation passed.
           The Winlator runtime is ARM64/Box64-oriented, so an x86_64 Android emulator is not
-          a valid end-to-end runtime test. Previous CI failed only after the APK itself had
-          built and verified successfully. Real runtime validation must be performed on an
-          ARM64 Android device; the APK now includes diagnostics for that test.
+          a valid end-to-end runtime test. Real runtime validation must be performed on an
+          ARM64 Android device. This build uses a stable development signing key so future
+          test APKs can update it in place after this signing transition.
           EOF
 
       - name: Upload Android DLSS Host APK
         uses: actions/upload-artifact@v4
         with:
-          name: Android-DLSS-Host-Bridge-ARM64
+          name: Android-DLSS-Host-0.2.2-compat-ARM64
           path: |
-            winlator/app/build/outputs/apk/debug/app-debug.apk
+            winlator/app/build/outputs/apk/debug/Android-DLSS-Host-0.2.2-compat.apk
             Android-DLSS-Host.sha256
             AndroidFramePresenter.sha256
+            apk-signature.txt
           if-no-files-found: error
           retention-days: 14
