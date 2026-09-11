@@ -14,6 +14,26 @@ for name in ('DlssHostActivity.java', 'DlssLogActivity.java', 'AndroidFrameBridg
         raise SystemExit(f'missing host source: {src}')
     (javadir / name).write_text(src.read_text())
 
+# 1b) The first ARM64-device test showed Winlator staying forever on the
+# "Starting..." preloader before AndroidFramePresenter created its first
+# window. The presenter itself creates a Win32 window before touching D3D,
+# so this points at the DXVK/Vulkan startup path rather than MediaProjection.
+# For the capture bridge we therefore start with WineD3D, which still exposes
+# D3D11/DXGI to the original ReShade chain but uses Winlator's OpenGL backend
+# and is substantially more tolerant across Adreno/Mali/Xclipse devices.
+# The original DLSS package is not modified.
+host_activity = javadir / 'DlssHostActivity.java'
+hs = host_activity.read_text()
+if 'import com.winlator.container.DXWrappers;' not in hs:
+    hs = hs.replace('import com.winlator.container.ContainerManager;\n',
+                    'import com.winlator.container.ContainerManager;\nimport com.winlator.container.DXWrappers;\n')
+compat_marker = 'status.setText("Abrindo presenter D3D11. ReShade/DLSS5 do seu pacote será carregado no mesmo processo se for compatível com Wine/DXVK.");'
+compat_replacement = '''// Compatibility-first launch for real ARM64 phones. DXVK can hang before the\n        // first X11 window on some Android GPU/driver combinations. WineD3D keeps the\n        // same D3D11/DXGI API boundary, which is what the ReShade/DLSS5 chain hooks.\n        container.setDXWrapper(DXWrappers.WINED3D);\n        container.setDXWrapperConfig(\"\");\n        container.saveData();\n        status.setText(\"Abrindo presenter D3D11 em modo compatível (WineD3D). A cadeia ReShade/DLSS5 original continua ao lado do presenter.\");'''
+if compat_marker not in hs:
+    raise SystemExit('Could not find launchAndroidBridge status marker')
+hs = hs.replace(compat_marker, compat_replacement, 1)
+host_activity.write_text(hs)
+
 # 2) Embed only our MIT/open-source frame presenter. Proprietary DLSS/ReShade files stay user supplied.
 presenter = Path('bridge/AndroidFramePresenter.exe')
 if not presenter.is_file() or presenter.stat().st_size < 4096:
@@ -94,7 +114,7 @@ except ET.ParseError as exc:
 p = root / 'app/build.gradle'
 s = p.read_text()
 s = s.replace("applicationId 'com.winlator'", "applicationId 'com.lm.androiddlsshost'")
-s = s.replace('versionName "11.2"', 'versionName "0.2.1-bridge"')
+s = s.replace('versionName "11.2"', 'versionName "0.2.2-compat"')
 p.write_text(s)
 
 # 6) Rebrand the visible app name without renaming the upstream Java namespace.
@@ -103,4 +123,4 @@ ss = strings.read_text()
 ss = re.sub(r'<string name="app_name">.*?</string>', '<string name="app_name">Android DLSS Host</string>', ss, count=1)
 strings.write_text(ss)
 
-print('Winlator patched for Android DLSS Host + MediaProjection bridge; manifest XML validated')
+print('Winlator patched for Android DLSS Host + MediaProjection bridge + WineD3D compatibility launch; manifest XML validated')
