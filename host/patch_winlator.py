@@ -1,6 +1,7 @@
 from pathlib import Path
 import re
 import shutil
+import xml.etree.ElementTree as ET
 
 root = Path('winlator')
 
@@ -32,26 +33,68 @@ p.write_text(s)
 # 4) Make the host the single launcher and keep Winlator's original MainActivity internal.
 p = root / 'app/src/main/AndroidManifest.xml'
 s = p.read_text()
-old = '''        <activity android:name="com.winlator.MainActivity"\n            android:theme="@style/AppThemeDark"\n            android:exported="true"\n            android:screenOrientation="sensor"\n            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|density|navigation">\n            <intent-filter>\n                <action android:name="android.intent.action.MAIN"/>\n                <category android:name="android.intent.category.LAUNCHER"/>\n            </intent-filter>\n        </activity>'''
-new = '''        <activity android:name="com.winlator.DlssHostActivity"\n            android:theme="@style/AppThemeDark"\n            android:exported="true"\n            android:screenOrientation="sensor"\n            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|density|navigation">\n            <intent-filter>\n                <action android:name="android.intent.action.MAIN"/>\n                <category android:name="android.intent.category.LAUNCHER"/>\n            </intent-filter>\n        </activity>\n\n        <activity android:name="com.winlator.DlssLogActivity"\n            android:theme="@style/AppThemeDark"\n            android:exported="false"/>\n\n        <service android:name="com.winlator.AndroidFrameBridgeService"\n            android:exported="false"\n            android:foregroundServiceType="mediaProjection"/>\n\n        <activity android:name="com.winlator.MainActivity"\n            android:theme="@style/AppThemeDark"\n            android:exported="false"\n            android:screenOrientation="sensor"\n            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|density|navigation">\n        </activity>'''
+old = '''        <activity android:name="com.winlator.MainActivity"
+            android:theme="@style/AppThemeDark"
+            android:exported="true"
+            android:screenOrientation="sensor"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|density|navigation">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>'''
+new = '''        <activity android:name="com.winlator.DlssHostActivity"
+            android:theme="@style/AppThemeDark"
+            android:exported="true"
+            android:screenOrientation="sensor"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|density|navigation">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+
+        <activity android:name="com.winlator.DlssLogActivity"
+            android:theme="@style/AppThemeDark"
+            android:exported="false"/>
+
+        <service android:name="com.winlator.AndroidFrameBridgeService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection"/>
+
+        <activity android:name="com.winlator.MainActivity"
+            android:theme="@style/AppThemeDark"
+            android:exported="false"
+            android:screenOrientation="sensor"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|density|navigation">
+        </activity>'''
 if old not in s:
     raise SystemExit('MainActivity manifest block did not match upstream')
 s = s.replace(old, new)
 s = s.replace('android:authorities="com.winlator.FileProvider"', 'android:authorities="${applicationId}.FileProvider"')
 
-# Android 10+ needs foreground-service declaration, and Android 14+ requires the
-# mediaProjection-specific permission/type for this service.
-permissions = '''\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"/>\n'''
+# Android 14+ requires the mediaProjection-specific foreground-service permission.
+# IMPORTANT: permissions must be children of <manifest>, never inserted before it.
 if 'android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION' not in s:
-    idx = s.find('>') + 1
-    s = s[:idx] + permissions + s[idx:]
+    manifest_open = re.search(r'<manifest\b[^>]*>', s)
+    if not manifest_open:
+        raise SystemExit('Could not find <manifest> opening tag')
+    permission = '\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"/>'
+    s = s[:manifest_open.end()] + permission + s[manifest_open.end():]
+
 p.write_text(s)
+
+# Fail early with a clear message if a future upstream change produces invalid XML.
+try:
+    ET.parse(p)
+except ET.ParseError as exc:
+    raise SystemExit(f'Patched AndroidManifest.xml is invalid: {exc}')
 
 # 5) Give this build a separate application id and version name so it can coexist with Winlator.
 p = root / 'app/build.gradle'
 s = p.read_text()
 s = s.replace("applicationId 'com.winlator'", "applicationId 'com.lm.androiddlsshost'")
-s = s.replace('versionName "11.2"', 'versionName "0.2.0-bridge"')
+s = s.replace('versionName "11.2"', 'versionName "0.2.1-bridge"')
 p.write_text(s)
 
 # 6) Rebrand the visible app name without renaming the upstream Java namespace.
@@ -60,4 +103,4 @@ ss = strings.read_text()
 ss = re.sub(r'<string name="app_name">.*?</string>', '<string name="app_name">Android DLSS Host</string>', ss, count=1)
 strings.write_text(ss)
 
-print('Winlator patched for Android DLSS Host + MediaProjection bridge')
+print('Winlator patched for Android DLSS Host + MediaProjection bridge; manifest XML validated')
