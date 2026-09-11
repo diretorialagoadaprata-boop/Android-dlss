@@ -49,6 +49,9 @@ jobs:
         with:
           gradle-version: '9.6.0'
 
+      - name: Install Python test dependencies
+        run: python3 -m pip install --user numpy
+
       - name: Run optical-flow reference tests
         working-directory: work/project
         run: python3 tools/flow_reference_test.py
