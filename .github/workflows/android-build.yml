@@ -11,7 +11,7 @@ permissions:
 jobs:
   build-debug:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -33,7 +33,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          FILE="work/project/app/src/main/java/com/lm/neuralframe/ProjectionRenderer.java"
           python3 - <<'PY'
           from pathlib import Path
           p = Path("work/project/app/src/main/java/com/lm/neuralframe/ProjectionRenderer.java")
@@ -78,7 +77,7 @@ jobs:
         working-directory: work/project
         run: gradle --no-daemon --stacktrace :app:assembleDebug
 
-      - name: Verify APK
+      - name: Verify APK archive
         shell: bash
         run: |
           set -euo pipefail
@@ -87,6 +86,32 @@ jobs:
           unzip -t "$APK" >/dev/null
           sha256sum "$APK" | tee app-debug.sha256
           ls -lh "$APK"
+
+      - name: Enable KVM
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+
+      - name: Install and launch on Android emulator
+        uses: reactivecircus/android-emulator-runner@v2.38.0
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          disable-animations: true
+          script: |
+            set -e
+            APK="work/project/app/build/outputs/apk/debug/app-debug.apk"
+            adb install -r "$APK"
+            adb shell am force-stop com.lm.neuralframe
+            adb shell am start -W -n com.lm.neuralframe/.MainActivity | tee launch.txt
+            grep -Eq 'Status: ok|Status: timeout' launch.txt
+            adb shell pidof com.lm.neuralframe
+            adb shell dumpsys package com.lm.neuralframe | grep -q 'versionName'
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
