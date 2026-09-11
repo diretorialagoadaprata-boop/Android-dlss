@@ -57,7 +57,7 @@ jobs:
           chmod +x gradlew
           ./gradlew --no-daemon :app:assembleDebug
 
-      - name: Verify APK
+      - name: Verify APK archive
         shell: bash
         run: |
           set -euo pipefail
@@ -66,6 +66,53 @@ jobs:
           unzip -t "$APK" >/dev/null
           sha256sum "$APK" | tee Android-DLSS-Host.sha256
           ls -lh "$APK"
+
+      - name: Enable KVM
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+
+      - name: Install and boot-test host on Android 15
+        uses: reactivecircus/android-emulator-runner@v2.38.0
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          disable-animations: true
+          script: |
+            set -euo pipefail
+            APK="winlator/app/build/outputs/apk/debug/app-debug.apk"
+            PKG="com.lm.androiddlsshost"
+            ACT="$PKG/com.winlator.DlssHostActivity"
+            adb install -r "$APK"
+            adb logcat -c
+            adb shell am force-stop "$PKG" || true
+            adb shell am start -W -n "$ACT"
+            for i in $(seq 1 90); do
+              adb shell pidof "$PKG" >/dev/null
+              adb shell uiautomator dump /sdcard/host.xml >/dev/null 2>&1 || true
+              adb shell cat /sdcard/host.xml > host-ui.xml 2>/dev/null || true
+              if grep -q "Runtime pronto" host-ui.xml; then
+                echo "Host runtime/container reached ready state"
+                break
+              fi
+              if [ "$i" -eq 90 ]; then
+                echo "Host did not reach runtime-ready state in time"
+                adb logcat -d | tail -500
+                cat host-ui.xml || true
+                exit 1
+              fi
+              sleep 2
+            done
+            if adb logcat -d | grep -E "FATAL EXCEPTION|UnsatisfiedLinkError" | grep -q "$PKG\|com.winlator"; then
+              adb logcat -d | tail -500
+              exit 1
+            fi
+            adb shell pidof "$PKG"
 
       - name: Upload Android DLSS Host APK
         uses: actions/upload-artifact@v4
