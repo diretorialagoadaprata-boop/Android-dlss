@@ -1,0 +1,35 @@
+name: Link para Midia - direct standalone APK distribution
+on:
+  push:
+    branches: [ci-linkparamidia-android-20261026]
+    paths:
+      - .github/workflows/linkparamidia-direct-apk.yml
+  workflow_dispatch:
+permissions:
+  actions: read
+  contents: write
+jobs:
+  distribute:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch compiled and verified APK from successful build
+        uses: actions/download-artifact@v4
+        with:
+          name: LinkParaMidia-Android-APK
+          run-id: 40408279710
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: apk
+      - name: Prepare standalone direct APK
+        run: |
+          set -euo pipefail
+          cp apk/app-debug.apk LinkParaMidia_Android_1.1_ARM64.apk
+          test -s LinkParaMidia_Android_1.1_ARM64.apk
+          unzip -t LinkParaMidia_Android_1.1_ARM64.apk | tail -1
+          sha256sum LinkParaMidia_Android_1.1_ARM64.apk
+          file LinkParaMidia_Android_1.1_ARM64.apk
+      - name: Publish standalone APK for direct download without ZIP
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "linkparamidia-android-v1.1-direct"             LinkParaMidia_Android_1.1_ARM64.apk             --repo "$GITHUB_REPOSITORY"             --target "$GITHUB_SHA"             --title "Link para Midia Android - standalone APK 1.1"             --notes "APK Android ARM64 direto, sem ZIP. Assinado com chave de desenvolvimento. Compilacao, integridade e teste de instalacao da variante x86_64 aprovados; instalacao ARM64 em telefone fisico ainda nao homologada."             --prerelease
