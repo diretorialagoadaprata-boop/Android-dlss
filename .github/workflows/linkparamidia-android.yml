@@ -68,7 +68,7 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
       - name: Build debug APK
-        run: gradle --no-daemon -p linkparamidia :app:assembleDebug
+        run: gradle --no-daemon -p linkparamidia -PabiOverride=x86_64 :app:assembleDebug
       - name: Android emulator install and launch test
         uses: reactivecircus/android-emulator-runner@v2
         with:
