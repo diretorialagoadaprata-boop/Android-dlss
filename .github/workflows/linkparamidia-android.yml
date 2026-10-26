@@ -1,0 +1,76 @@
+name: Link para Midia Android APK
+on:
+  push:
+    branches: [ci-linkparamidia-android-20261026]
+    paths:
+      - 'linkparamidia/**'
+      - '.github/workflows/linkparamidia-android.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Install Android SDK
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Unit tests for intervals and formats
+        run: bash linkparamidia/tests/run.sh
+      - name: Assemble Android APK
+        run: gradle --no-daemon -p linkparamidia :app:assembleDebug --stacktrace
+      - name: Verify APK integrity and package identity
+        run: |
+          set -euo pipefail
+          APK=linkparamidia/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          unzip -t "$APK" | tail -1
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep "package: name='br.com.linkparamidia'"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep "launchable-activity: name='br.com.linkparamidia.MainActivity'"
+      - name: Publish APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LinkParaMidia-Android-APK
+          path: linkparamidia/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
+  android-smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Install SDK
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Build debug APK
+        run: gradle --no-daemon -p linkparamidia :app:assembleDebug
+      - name: Android emulator install and launch test
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          script: |
+            adb install -r linkparamidia/app/build/outputs/apk/debug/app-debug.apk
+            adb shell am start -W -n br.com.linkparamidia/.MainActivity
+            sleep 6
+            adb shell pidof br.com.linkparamidia
+            adb shell uiautomator dump /sdcard/window.xml
+            adb shell cat /sdcard/window.xml | grep 'Link para Mídia'
