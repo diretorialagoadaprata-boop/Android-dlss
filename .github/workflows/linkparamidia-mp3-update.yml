@@ -2,7 +2,7 @@ name: LinkParaMidia Android MP3 1.3 update
 on:
   push:
     branches: [linkparamidia-mp3-fix-20261026]
-    paths: ['linkparamidia/**', '.github/workflows/linkparamidia-release.yml']
+    paths: ['linkparamidia/**', '.github/workflows/linkparamidia-mp3-update.yml']
   workflow_dispatch:
 permissions:
   contents: write
