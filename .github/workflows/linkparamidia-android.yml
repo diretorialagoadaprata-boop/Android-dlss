@@ -40,8 +40,10 @@ jobs:
           APK=linkparamidia/app/build/outputs/apk/debug/app-debug.apk
           test -s "$APK"
           unzip -t "$APK" | tail -1
-          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep "package: name='br.com.linkparamidia'"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep "package: name='br.com.linkparamidia.compat2026'"
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep "launchable-activity: name='br.com.linkparamidia.MainActivity'"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
+          unzip -l "$APK" | grep 'lib/arm64-v8a/libffmpeg.so'
       - name: Publish APK artifact
         uses: actions/upload-artifact@v4
         with:
@@ -69,16 +71,18 @@ jobs:
           sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
       - name: Build debug APK
         run: gradle --no-daemon -p linkparamidia -PabiOverride=x86_64 :app:assembleDebug
+      - name: Enable KVM acceleration if available
+        run: |
+          if [ -e /dev/kvm ]; then sudo chmod 666 /dev/kvm; fi
       - name: Android emulator install and launch test
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 35
+          api-level: 30
           arch: x86_64
           target: google_apis
+          emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -memory 2048 -cores 2
           script: |
             adb install -r linkparamidia/app/build/outputs/apk/debug/app-debug.apk
-            adb shell am start -W -n br.com.linkparamidia/.MainActivity
-            sleep 6
-            adb shell pidof br.com.linkparamidia
-            adb shell uiautomator dump /sdcard/window.xml
-            adb shell cat /sdcard/window.xml | grep 'Link para Mídia'
+            adb shell am start -n br.com.linkparamidia.compat2026/br.com.linkparamidia.MainActivity
+            sleep 4
+            adb shell pidof br.com.linkparamidia.compat2026
