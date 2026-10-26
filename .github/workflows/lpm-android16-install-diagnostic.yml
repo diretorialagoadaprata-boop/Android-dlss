@@ -1,0 +1,63 @@
+name: Link para Midia - Android 16 installation diagnostics
+on:
+  push:
+    branches: [ci-linkparamidia-android-20261026]
+    paths:
+      - .github/workflows/lpm-android16-install-diagnostic.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  exact-apk-android16:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ["google_apis", "google_apis_ps16k"]
+    steps:
+      - name: Download previously released EXACT APK
+        uses: actions/download-artifact@v4
+        with:
+          name: LinkParaMidia-Android-APK
+          run-id: 40408279710
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: apk
+      - uses: android-actions/setup-android@v4
+      - name: Check signed APK and relevant ABIs
+        run: |
+          set -eux
+          sdkmanager "build-tools;35.0.0" "platform-tools"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs apk/app-debug.apk
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 4 apk/app-debug.apk
+          unzip -Z1 apk/app-debug.apk | grep 'lib/arm64-v8a/libffmpeg.so'
+      - name: KVM access
+        run: |
+          if [ -e /dev/kvm ]; then sudo chmod 666 /dev/kvm; fi
+      - name: Install and launch released APK, report package manager rejection
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          arch: x86_64
+          target: ${{ matrix.target }}
+          emulator-boot-timeout: 650
+          emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -memory 2048 -cores 2
+          script: |
+            set -ux
+            echo "DEVICE"
+            adb shell getprop ro.build.version.release
+            adb shell getprop ro.product.cpu.abilist
+            adb shell getconf PAGE_SIZE
+            echo "TESTING EXACT DISTRIBUTED APK"
+            adb install -r apk/app-debug.apk
+            result=$?
+            echo "APK_INSTALL_EXIT=$result"
+            adb shell pm path br.com.linkparamidia.compat2026
+            if [ "$result" -eq 0 ]; then
+              adb shell am start -n br.com.linkparamidia.compat2026/br.com.linkparamidia.MainActivity
+              sleep 5
+              adb shell pidof br.com.linkparamidia.compat2026
+              adb logcat -d -s AndroidRuntime:E | tail -40
+            fi
+            exit "$result"
