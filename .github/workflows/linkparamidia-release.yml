@@ -1,0 +1,119 @@
+name: LinkParaMidia Android signed release
+on:
+  push:
+    branches: [linkparamidia-release-20261026]
+    paths: ['linkparamidia/**', '.github/workflows/linkparamidia-release.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: SDK packages
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Install FFmpeg for real media tests
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+      - name: Test times, quality, conversion and clips
+        run: bash linkparamidia/tests/run.sh
+      - name: Generate release signing key
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/lpm"
+          pw="$(openssl rand -hex 24)"
+          echo "::add-mask::$pw"
+          echo "LPM_STORE_PASSWORD=$pw" >> "$GITHUB_ENV"
+          echo "LPM_KEY_PASSWORD=$pw" >> "$GITHUB_ENV"
+          echo "LPM_KEY_ALIAS=linkparamidia" >> "$GITHUB_ENV"
+          echo "LPM_KEYSTORE_PATH=$RUNNER_TEMP/lpm/release.jks" >> "$GITHUB_ENV"
+          keytool -genkeypair -keystore "$RUNNER_TEMP/lpm/release.jks" -alias linkparamidia -keyalg RSA -keysize 3072 -validity 3650 -storepass "$pw" -keypass "$pw" -dname 'CN=Link para Midia, OU=Android, O=Link para Midia, C=BR' -noprompt
+      - name: Assemble genuine release APK
+        run: gradle --no-daemon -p linkparamidia :app:assembleRelease --stacktrace
+      - name: Inspect signature and manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=linkparamidia/app/build/outputs/apk/release/app-release.apk
+          test -s "$APK"
+          unzip -t "$APK" | tail -1
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | tee "$RUNNER_TEMP/badging.txt"
+          grep "package: name='br.com.linkparamidia.mobile'" "$RUNNER_TEMP/badging.txt"
+          grep "launchable-activity: name='br.com.linkparamidia.MainActivity'" "$RUNNER_TEMP/badging.txt"
+          if grep -q application-debuggable "$RUNNER_TEMP/badging.txt"; then exit 1; fi
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" | tee "$RUNNER_TEMP/sig.txt"
+          grep "Verified using v2 scheme.*true" "$RUNNER_TEMP/sig.txt"
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 4 "$APK"
+          unzip -Z1 "$APK" | grep -Fx 'lib/arm64-v8a/libffmpeg.so'
+          sha256sum "$APK"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LinkParaMidia-Android-1.2-Release
+          path: linkparamidia/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+          retention-days: 30
+
+  emulator:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [google_apis, google_apis_ps16k]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: LinkParaMidia-Android-1.2-Release
+          path: apk
+      - uses: android-actions/setup-android@v4
+      - name: KVM
+        run: if [ -e /dev/kvm ]; then sudo chmod 666 /dev/kvm; fi
+      - name: Install exact RELEASE APK and launch on Android 16
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          arch: x86_64
+          target: ${{ matrix.target }}
+          emulator-boot-timeout: 650
+          emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -memory 2048 -cores 2
+          script: |
+            adb shell getprop ro.build.version.release
+            adb shell getconf PAGE_SIZE
+            adb install -r apk/app-release.apk
+            adb shell pm path br.com.linkparamidia.mobile
+            adb shell am start -n br.com.linkparamidia.mobile/br.com.linkparamidia.MainActivity
+            sleep 5
+            adb shell pidof br.com.linkparamidia.mobile
+            adb logcat -d -s AndroidRuntime:E | tail -20
+
+  publish:
+    needs: [build, emulator]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: LinkParaMidia-Android-1.2-Release
+          path: apk
+      - name: Publish direct APK (only if emulators passed)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cp apk/app-release.apk LinkParaMidia_Android_1.2_ARM64_RELEASE.apk
+          gh release create linkparamidia-android-v1.2-release LinkParaMidia_Android_1.2_ARM64_RELEASE.apk --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Link para Midia Android 1.2 - Release" --notes "APK release nao depuravel, assinado e validado em emuladores Android 16 com paginas 4KB e 16KB. A instalacao em aparelhos Xiaomi reais e downloads de plataformas de terceiros ainda nao foram confirmados." --prerelease
