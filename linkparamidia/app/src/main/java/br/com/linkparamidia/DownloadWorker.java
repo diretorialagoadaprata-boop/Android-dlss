@@ -57,8 +57,7 @@ public final class DownloadWorker {
     try{
       if(!staging.mkdirs())throw new IOException("Não foi possível preparar o armazenamento temporário.");
       emit("Preparando ferramentas…");
-      YoutubeDL.getInstance().init(app);
-      FFmpeg.getInstance().init(app);
+      EngineSetup.prepare(app, this::emit);
       if(cancelled.get())throw new InterruptedException("Cancelado.");
       YoutubeDLRequest req=new YoutubeDLRequest(spec.url);
       List<String> args=ClipRules.makeArgs(spec,staging);
@@ -81,10 +80,10 @@ public final class DownloadWorker {
               return Unit.INSTANCE;
             }
           });
-        String output=response==null?"":response.getOut();
-        if(output!=null && (output.contains("ERROR:")||output.contains("Sign in to confirm")))
-          error="A origem rejeitou parte do processamento. Os arquivos produzidos serão validados.";
-      }catch(Exception ex){error=message(ex);}
+        String output=response==null?"":(response.getOut()+"\n"+response.getErr());
+        if(output.contains("ERROR:") || output.contains("Sign in to confirm"))
+          error=DownloadOutcome.publicError(output);
+      }catch(Exception ex){error=DownloadOutcome.publicError(message(ex));}
       if(!cancelled.get()){
         File[] produced=staging.listFiles(f->f.isFile()&&
           (f.getName().toLowerCase(Locale.ROOT).endsWith(".mp4")||
@@ -116,6 +115,7 @@ public final class DownloadWorker {
     finally{
       if(cancelled.get())error="Operação cancelada.";
       delete(staging);
+      rejected=DownloadOutcome.failures(saved,rejected,error,cancelled.get());
       finish(saved,rejected,error);
     }
   }
@@ -151,7 +151,7 @@ public final class DownloadWorker {
   }
   static String message(Throwable t){
     String m=t.getMessage();if(m==null||m.isEmpty())return t.getClass().getSimpleName();
-    if(m.contains("Sign in to confirm"))return "A plataforma pediu verificação de acesso. Nenhum arquivo bloqueado foi considerado concluído.";
+    if(m.contains("Sign in to confirm"))return DownloadOutcome.publicError(m);
     return m.length()>360?m.substring(0,360):m;
   }
   static void delete(File folder){
