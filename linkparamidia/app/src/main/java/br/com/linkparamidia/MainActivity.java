@@ -74,7 +74,7 @@ public final class MainActivity extends Activity {
     void buildUi(){
         ScrollView scroll=new ScrollView(this);scroll.setBackgroundColor(BG);
         LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(18),dp(22),dp(18),dp(28));scroll.addView(root);setContentView(scroll);
+        root.setPadding(dp(18),dp(22),dp(18),dp(76));scroll.addView(root);setContentView(scroll);
         TextView title=text("Link para Mídia",27,true);add(root,title,0);
         add(root,text("Vídeos, playlists e trechos no celular.",14,false),0);
         add(root,text("LINK DO VÍDEO OU PLAYLIST",12,true),18);
@@ -152,7 +152,8 @@ public final class MainActivity extends Activity {
                 @Override public void progress(int p){progress.setProgress(p);}
                 @Override public void finished(int saved,int rejected,String error){
                     busy(false);
-                    status.setText(error!=null?"Atenção: "+error:(saved>0?"Download concluído.":"Nenhum arquivo salvo."));
+                    status.setText(DownloadOutcome.summary(saved,rejected,error,false)
+                        +(error==null?"":" "+DownloadOutcome.publicError(error)));
                     result.setText("Arquivos salvos: "+saved+"   |   Falhas: "+rejected);
                 }
             });
@@ -175,7 +176,7 @@ public final class MainActivity extends Activity {
         String url=link.getText().toString();
         new Thread(()->{
             try{
-                YoutubeDL.getInstance().init(getApplicationContext());
+                EngineSetup.prepare(getApplicationContext(), m->runOnUiThread(()->status.setText(m)));
                 YoutubeDLRequest req=new YoutubeDLRequest(url);req.addOption("--no-playlist");
                 Object info=YoutubeDL.getInstance().getInfo(req);
                 Object formats=info.getClass().getMethod("getFormats").invoke(info);
