@@ -1,0 +1,51 @@
+name: Link para Midia - exact ARM64 APK install check
+on:
+  push:
+    branches: [ci-linkparamidia-android-20261026]
+    paths:
+      - .github/workflows/linkparamidia-arm64-package-install.yml
+  workflow_dispatch:
+permissions:
+  actions: read
+  contents: read
+jobs:
+  test-arm64-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: LinkParaMidia-Android-APK
+          run-id: 40408279710
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: apk
+      - name: Verify same exact ARM64 distributable
+        run: |
+          test -s apk/app-debug.apk
+          sha256sum apk/app-debug.apk
+          unzip -Z1 apk/app-debug.apk | grep 'lib/arm64-v8a/libffmpeg.so'
+          if unzip -Z1 apk/app-debug.apk | grep -qE '^lib/(x86|x86_64|armeabi-v7a)/'; then exit 1; fi
+      - uses: android-actions/setup-android@v4
+      - name: Emulator enable KVM
+        run: |
+          if [ -e /dev/kvm ]; then sudo chmod 666 /dev/kvm; fi
+      - name: Try to install EXACT published ARM64-only APK on API 35 emulator with ARM translation
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-boot-timeout: 700
+          emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -memory 2048 -cores 2 -camera-back none -camera-front none
+          script: |
+            set -eu
+            echo "EMULATOR CPU:"
+            adb shell getprop ro.product.cpu.abilist
+            echo "START INSTALL of real ARM64 APK"
+            adb install -r apk/app-debug.apk
+            adb shell pm path br.com.linkparamidia.compat2026
+            adb shell am start -n br.com.linkparamidia.compat2026/br.com.linkparamidia.MainActivity
+            sleep 5
+            adb shell pidof br.com.linkparamidia.compat2026
+            adb logcat -d -s AndroidRuntime:E | tail -40
