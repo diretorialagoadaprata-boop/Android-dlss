@@ -39,7 +39,9 @@ jobs:
             adb install -r apk/app-release.apk
             adb shell pm path br.com.linkparamidia.auth2026
             adb shell am start -n br.com.linkparamidia.auth2026/br.com.linkparamidia.MainActivity
-            sleep 12
+            sleep 25
+            adb shell dumpsys activity activities | grep -E 'topResumedActivity|mFocusedWindow' | head -4 || true
+            adb logcat -d -v brief | grep -E 'LPM_ENGINE|AndroidRuntime|FATAL EXCEPTION|Fatal signal' | tail -50 || true
             adb shell pidof br.com.linkparamidia.auth2026
             adb logcat -d -v brief | grep 'LPM_ENGINE.*QJS_OK'
             adb logcat -d -s AndroidRuntime:E | tail -15
