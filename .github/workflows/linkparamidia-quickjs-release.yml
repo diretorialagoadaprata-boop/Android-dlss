@@ -115,7 +115,7 @@ jobs:
             adb install -r apk/app-release.apk
             adb shell pm path br.com.linkparamidia.media2026js
             adb shell am start -n br.com.linkparamidia.media2026js/br.com.linkparamidia.MainActivity
-            sleep 5
+            sleep 12
             adb shell pidof br.com.linkparamidia.media2026js
             adb logcat -d -s LPM_ENGINE:I LPM_ENGINE:E | tee /tmp/lpm-js.txt
             grep 'QJS_OK' /tmp/lpm-js.txt
