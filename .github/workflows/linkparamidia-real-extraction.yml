@@ -1,0 +1,50 @@
+name: Link para Midia - REAL extraction checks
+on:
+  push:
+    branches: [linkparamidia-test-real-media-20261026]
+    paths: ['.github/workflows/linkparamidia-real-extraction.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  real-extraction:
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install current official media tools
+        run: |
+          python -m pip install -U 'yt-dlp[default]'
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          python -m yt_dlp --version
+      - name: Attempt MP3 and four-second section from real remote public MP4
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/lpm-good
+          timeout 105 python -m yt_dlp --no-playlist --no-overwrites --extract-audio --audio-format mp3 --audio-quality 192K --download-sections '*00:00:00-00:00:04' --force-keyframes-at-cuts --output '/tmp/lpm-good/%(id)s.%(ext)s' 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4'
+          f="$(find /tmp/lpm-good -type f -name '*.mp3' | head -1)"
+          test -s "$f"
+          dur="$(ffprobe -v error -show_entries format=duration -of default=nokey=1:noprint_wrappers=1 "$f")"
+          echo "Real remote MP4 -> MP3 duration: $dur"
+          python -c 'import sys; d=float(sys.argv[1]); assert 3.5 < d < 5, d' "$dur"
+      - name: Attempt public YouTube audio (document result even on bot verification)
+        shell: bash
+        run: |
+          set +e
+          mkdir -p /tmp/lpm-yt
+          timeout 100 python -m yt_dlp --no-playlist --no-overwrites --extract-audio --audio-format mp3 --audio-quality 128K --download-sections '*00:00:00-00:00:04' --force-keyframes-at-cuts --output '/tmp/lpm-yt/%(id)s.%(ext)s' 'https://www.youtube.com/watch?v=BaW_jenozKc' > /tmp/lpm-yt/default.txt 2>&1
+          status="$?"
+          echo "YT_DEFAULT_STATUS=$status"
+          tail -15 /tmp/lpm-yt/default.txt
+          test -n "$(find /tmp/lpm-yt -name '*.mp3' -size +1k -print -quit)"
+          echo "YT_DEFAULT_MP3=$?"
+          if [ "$status" -ne 0 ]; then
+            timeout 100 python -m yt_dlp --no-playlist --no-overwrites --extractor-args 'youtube:player_client=tv,web_safari' --extract-audio --audio-format mp3 --audio-quality 128K --download-sections '*00:00:00-00:00:04' --force-keyframes-at-cuts --output '/tmp/lpm-yt/fallback_%(id)s.%(ext)s' 'https://www.youtube.com/watch?v=BaW_jenozKc' > /tmp/lpm-yt/alternative.txt 2>&1
+            echo "YT_ALTERNATE_STATUS=$?"
+            tail -15 /tmp/lpm-yt/alternative.txt
+          fi
+          exit 0
