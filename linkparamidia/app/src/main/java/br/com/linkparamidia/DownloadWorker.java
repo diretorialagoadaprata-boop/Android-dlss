@@ -60,6 +60,7 @@ public final class DownloadWorker {
       EngineSetup.prepare(app, this::emit);
       if(cancelled.get())throw new InterruptedException("Cancelado.");
       YoutubeDLRequest req=new YoutubeDLRequest(spec.url);
+      JavascriptEngine.configure(app,req,spec.url);
       List<String> args=ClipRules.makeArgs(spec,staging);
       Set<String> parameters=new HashSet<>(Arrays.asList(
         "--retries","--fragment-retries","--trim-filenames","--output","--format",
