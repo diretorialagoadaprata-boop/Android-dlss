@@ -43,14 +43,14 @@ public final class JavascriptEngine {
         try {
             Process p=new ProcessBuilder(qjs.getAbsolutePath(),"-e","print('LPM_QJS_OK')")
                 .redirectErrorStream(true).start();
-            String output;
-            try(BufferedReader r=new BufferedReader(new InputStreamReader(p.getInputStream()))) {
-                output=r.readLine();
-            }
             boolean done=p.waitFor(7,TimeUnit.SECONDS);
             if(!done) {
                 p.destroyForcibly();
                 return "Teste do interpretador JavaScript excedeu o limite.";
+            }
+            String output;
+            try(BufferedReader r=new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                output=r.readLine();
             }
             if(p.exitValue()!=0 || output==null || !output.contains("LPM_QJS_OK")){
                 return "Interpretador JavaScript não iniciou: "+(output==null?"sem saída":output);
