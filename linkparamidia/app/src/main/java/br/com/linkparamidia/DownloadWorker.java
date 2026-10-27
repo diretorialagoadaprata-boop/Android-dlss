@@ -60,7 +60,6 @@ public final class DownloadWorker {
       EngineSetup.prepare(app, this::emit);
       if(cancelled.get())throw new InterruptedException("Cancelado.");
       YoutubeDLRequest req=new YoutubeDLRequest(spec.url);
-      JavascriptEngine.configure(app,req,spec.url);
       if(JavascriptEngine.isYouTube(spec.url) && UserSession.exists(app)){
         req.addOption("--cookies",UserSession.file(app).getAbsolutePath());
         emit("Usando sessão autorizada salva no aparelho...");
@@ -78,6 +77,7 @@ public final class DownloadWorker {
       }
       emit(spec.playlist?"Baixando playlist…":"Baixando arquivo…");
       try{
+        JavascriptEngine.configure(app,req,spec.url);
         YoutubeDLResponse response=YoutubeDL.getInstance().execute(req,processId,
           new Function3<Float,Long,String,Unit>(){
             @Override public Unit invoke(Float pct,Long eta,String line){
