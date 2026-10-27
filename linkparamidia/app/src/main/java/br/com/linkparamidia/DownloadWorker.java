@@ -89,6 +89,43 @@ public final class DownloadWorker {
         if(output.contains("ERROR:") || output.contains("Sign in to confirm"))
           error=DownloadOutcome.publicError(output);
       }catch(Exception ex){error=DownloadOutcome.publicError(message(ex));}
+
+      // The two extractors are independent: yt-dlp handles the original page,
+      // NewPipe resolves a direct stream, and local yt-dlp+FFmpeg converts it.
+      // No alternative engine is used for playlists or non-YouTube URLs.
+      File[] firstFiles=staging.listFiles(f->f.isFile() &&
+          f.getName().toLowerCase(Locale.ROOT).endsWith(spec.mp3?".mp3":".mp4"));
+      if(!cancelled.get() && JavascriptEngine.isYouTube(spec.url) && !spec.playlist &&
+          (error!=null || firstFiles==null || firstFiles.length==0)){
+        String originalFailure=error;
+        try {
+          emit("Tentando motor alternativo gratuito NewPipe...");
+          YoutubeDLRequest alternative=NewPipeFallback.mediaRequest(spec,staging);
+          if(cancelled.get())throw new InterruptedException("Cancelado.");
+          YoutubeDLResponse alternateResponse=YoutubeDL.getInstance().execute(alternative,processId,
+            new Function3<Float,Long,String,Unit>(){
+              @Override public Unit invoke(Float pct,Long eta,String line){
+                if(pct!=null)progress(pct.intValue());
+                return Unit.INSTANCE;
+              }
+            });
+          String altOutput=alternateResponse==null?"":(alternateResponse.getOut()+"\\n"+alternateResponse.getErr());
+          File[] newFiles=staging.listFiles(f->f.isFile() &&
+              f.getName().toLowerCase(Locale.ROOT).endsWith(spec.mp3?".mp3":".mp4"));
+          if(newFiles!=null && newFiles.length>0 && !altOutput.contains("ERROR:")){
+            error=null;
+            emit("O mecanismo alternativo obteve uma mídia. Validando antes de salvar...");
+          } else {
+            error="Os dois mecanismos não concluíram o download. "
+                +DownloadOutcome.publicError(altOutput.isEmpty()?"Sem mídia produzida.":altOutput);
+          }
+        }catch(InterruptedException ex){throw ex;}
+        catch(Exception ex){
+          String alt=DownloadOutcome.publicError(message(ex));
+          error="Os dois mecanismos falharam. Alternativo: "+alt;
+          emit("Motor alternativo indisponível para este link.");
+        }
+      }
       if(!cancelled.get()){
         File[] produced=staging.listFiles(f->f.isFile()&&
           (f.getName().toLowerCase(Locale.ROOT).endsWith(".mp4")||
