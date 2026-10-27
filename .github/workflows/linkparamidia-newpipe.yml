@@ -144,5 +144,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          latest="$(gh api "repos/$GITHUB_REPOSITORY/branches/linkparamidia-newpipe-fallback-20261026" --jq .commit.sha)"
+          if [ "$latest" != "$GITHUB_SHA" ]; then echo "Older build: skipping stale release"; exit 0; fi
           cp apk/app-release.apk LinkParaMidia_Android_1.6_ARM64_RELEASE.apk
           gh release create linkparamidia-android-v1.6-newpipe LinkParaMidia_Android_1.6_ARM64_RELEASE.apk --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Link para Midia Android 1.6 - NewPipe fallback" --notes "APK ARM64 com NewPipeExtractor GPLv3 como segunda tentativa de extracao, apos yt-dlp, sem API paga. Bibliotecas locais para conversao MP3 e MP4. Testes de instalacao e extrator ainda nao garantem download real do YouTube nem eliminam bloqueios de acesso. Codigo e licenca GPLv3 disponiveis no branch linkparamidia-newpipe-fallback-20261026." --prerelease
