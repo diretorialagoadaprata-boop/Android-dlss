@@ -36,12 +36,15 @@ public final class MainActivity extends Activity {
     final ArrayList<Integer> heights=new ArrayList<>();
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
+        android.util.Log.i("LPM_ENGINE","ONCREATE_BEGIN");
         getWindow().setStatusBarColor(NAVY);
         getWindow().setNavigationBarColor(NAVY);
         String location=getPreferences(MODE_PRIVATE).getString("folder","");
         if(!location.isEmpty()) folder=Uri.parse(location);
         buildUi();
+        android.util.Log.i("LPM_ENGINE","ONCREATE_BUILT_UI");
         new Thread(()->{
+            android.util.Log.i("LPM_ENGINE","QJS_PROBE_STARTED");
             String problem=JavascriptEngine.check(getApplicationContext());
             if(problem!=null)android.util.Log.e("LPM_ENGINE","QJS_FAIL "+problem);
         },"LPM-js-boot-check").start();
