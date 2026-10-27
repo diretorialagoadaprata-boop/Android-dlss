@@ -1,0 +1,43 @@
+name: Link para Midia - real MP3 extraction Android test
+on:
+  push:
+    branches: [linkparamidia-newpipe-fallback-20261026]
+    paths: ['.github/workflows/lpm-newpipe-real-mp3.yml','linkparamidia/app/src/androidTest/**']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  real-mp3:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Build real Android instrumented test
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+          gradle --no-daemon -p linkparamidia :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
+      - name: KVM
+        run: if [ -e /dev/kvm ]; then sudo chmod 666 /dev/kvm; fi
+      - name: Download actual public YouTube audio through NewPipe on Android
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          arch: x86_64
+          target: google_apis
+          emulator-boot-timeout: 700
+          emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -memory 2048 -cores 2
+          script: |
+            adb install -r linkparamidia/app/build/outputs/apk/debug/app-debug.apk
+            adb install -r linkparamidia/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+            adb logcat -c
+            adb shell am instrument -w -e class br.com.linkparamidia.RealNewPipeMp3Test br.com.linkparamidia.newpipe2026.test/androidx.test.runner.AndroidJUnitRunner
+            adb logcat -d -v brief | grep LPM_REAL_MP3 | tail -20
