@@ -146,6 +146,8 @@ public final class MainActivity extends Activity {
         sessionClear.setVisibility(UserSession.exists(this)?View.VISIBLE:View.GONE);
         add(root,sessionPanel,12);
         sessionPanel.setVisibility(UserSession.exists(this)?View.VISIBLE:View.GONE);
+        TextView freeNotice=text("Gratuito, sem API paga. Extração alternativa NewPipeExtractor (GPLv3). Código-fonte e licença: github.com/diretorialagoadaprata-boop/Android-dlss",11,false);
+        add(root,freeNotice,14);
     }
     void chooseSessionFile() {
         Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);
