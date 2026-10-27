@@ -98,7 +98,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [google_apis, google_apis_ps16k]
+        target: [google_apis]
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -121,8 +121,10 @@ jobs:
             adb install -r apk/app-release.apk
             adb shell pm path br.com.linkparamidia.media2026js
             adb shell am start -n br.com.linkparamidia.media2026js/br.com.linkparamidia.MainActivity
-            sleep 12
+            sleep 20
             adb shell pidof br.com.linkparamidia.media2026js
+            adb shell dumpsys activity activities | grep -E 'mResumed|mFocused|topResumedActivity' | head -8 || true
+            adb logcat -d -v brief | grep -E 'LPM_ENGINE|AndroidRuntime' | tail -45 || true
             adb logcat -d -s LPM_ENGINE:I LPM_ENGINE:E | tee /tmp/lpm-js.txt
             grep 'QJS_OK' /tmp/lpm-js.txt
             adb logcat -d -s AndroidRuntime:E | tail -20
