@@ -44,11 +44,6 @@ public final class MainActivity extends Activity {
         if(!location.isEmpty()) folder=Uri.parse(location);
         buildUi();
         android.util.Log.i("LPM_ENGINE","ONCREATE_BUILT_UI");
-        new Thread(()->{
-            android.util.Log.i("LPM_ENGINE","QJS_PROBE_STARTED");
-            String problem=JavascriptEngine.check(getApplicationContext());
-            if(problem!=null)android.util.Log.e("LPM_ENGINE","QJS_FAIL "+problem);
-        },"LPM-js-boot-check").start();
         Intent in=getIntent();
         if(Intent.ACTION_SEND.equals(in.getAction()) && "text/plain".equals(in.getType())) {
             String shared=in.getStringExtra(Intent.EXTRA_TEXT);
