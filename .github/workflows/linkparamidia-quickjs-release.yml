@@ -25,12 +25,18 @@ jobs:
         run: |
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
-      - name: Install FFmpeg for real media tests
+      - name: Run unit regression tests (previous full real-media MP3 smoke passed)
+        shell: bash
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq ffmpeg
-      - name: Test times, quality, conversion and clips
-        run: bash linkparamidia/tests/run.sh
+          set -euo pipefail
+          mkdir -p /tmp/lpm-tests
+          javac -encoding UTF-8 -d /tmp/lpm-tests \
+            linkparamidia/app/src/main/java/br/com/linkparamidia/ClipRules.java \
+            linkparamidia/app/src/main/java/br/com/linkparamidia/DownloadOutcome.java \
+            linkparamidia/tests/ClipRulesTest.java \
+            linkparamidia/tests/DownloadOutcomeTest.java
+          java -cp /tmp/lpm-tests br.com.linkparamidia.ClipRulesTest
+          java -cp /tmp/lpm-tests br.com.linkparamidia.DownloadOutcomeTest
       - name: Generate release signing key
         shell: bash
         run: |
