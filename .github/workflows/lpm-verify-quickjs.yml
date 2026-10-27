@@ -1,0 +1,64 @@
+name: Verify exact LinkParaMidia 1.4 APK and publish
+on:
+  push:
+    branches: [linkparamidia-youtube-js-runtime-20261026]
+    paths: ['.github/workflows/lpm-verify-quickjs.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+jobs:
+  exact-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [google_apis, google_apis_ps16k]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: LinkParaMidia-Android-1.4-Release
+          run-id: 40426920675
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: apk
+      - uses: android-actions/setup-android@v4
+      - name: Enable KVM
+        run: if [ -e /dev/kvm ]; then sudo chmod 666 /dev/kvm; fi
+      - name: Install exact signed APK; run embedded Android JS runtime
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          arch: x86_64
+          target: ${{ matrix.target }}
+          emulator-boot-timeout: 700
+          emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -memory 2048 -cores 2
+          script: |
+            adb shell getconf PAGE_SIZE
+            adb install -r apk/app-release.apk
+            adb shell pm path br.com.linkparamidia.media2026js
+            adb shell am start -n br.com.linkparamidia.media2026js/br.com.linkparamidia.MainActivity
+            sleep 15
+            adb shell pidof br.com.linkparamidia.media2026js
+            adb logcat -d -v brief | grep 'LPM_ENGINE.*QJS_OK'
+            adb logcat -d -s AndroidRuntime:E | tail -12
+
+  publish:
+    needs: [exact-apk]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: LinkParaMidia-Android-1.4-Release
+          run-id: 40426920675
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: apk
+      - name: Publish directly installable APK from validated artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cp apk/app-release.apk LinkParaMidia_Android_1.4_ARM64_JS.apk
+          unzip -t LinkParaMidia_Android_1.4_ARM64_JS.apk | tail -1
+          sha256sum LinkParaMidia_Android_1.4_ARM64_JS.apk
+          gh release create linkparamidia-android-v1.4-js LinkParaMidia_Android_1.4_ARM64_JS.apk --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Link para Midia Android 1.4 - JavaScript EJS" --notes "APK com QuickJS-NG ARM64 e JS runtime yt-dlp validado em emuladores Android 16. Bot check do YouTube pode continuar exigindo autenticacao; nao testado com a conta ou aparelho do usuario. Conversion and interval logic regressions passed." --prerelease
