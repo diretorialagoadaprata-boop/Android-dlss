@@ -21,7 +21,7 @@ import com.yausername.youtubedl_android.YoutubeDLRequest;
 import java.util.*;
 
 public final class MainActivity extends Activity {
-    static final int PICK=4401;
+    static final int PICK=4401, PICK_SESSION=4402;
     static final int NAVY=Color.rgb(19,39,66), BLUE=Color.rgb(25,95,188),
         BG=Color.rgb(246,248,251), MUTED=Color.rgb(86,103,120);
     EditText link,start,end;
@@ -29,7 +29,8 @@ public final class MainActivity extends Activity {
     CheckBox playlist;
     TextView folderInfo,status,result;
     ProgressBar progress;
-    Button download,cancel,inspect;
+    Button download,cancel,inspect,sessionImport,sessionClear;
+    LinearLayout sessionPanel;
     Uri folder;
     DownloadWorker worker;
     boolean startAfterFolder=false;
@@ -105,9 +106,9 @@ public final class MainActivity extends Activity {
         bitrate=choices(Arrays.asList("320 kbps","256 kbps","192 kbps","128 kbps"));add(root,bitrate,2);
         add(root,text("A conversão não aumenta a qualidade do áudio original.",12,false),2);
         add(root,text("RECORTE OPCIONAL",12,true),12);
-        add(root,text("Sem horários: arquivo completo. Com horários: só o trecho indicado.",13,false),0);
+        add(root,text("Deixe ambos os campos vazios para baixar tudo. Preencha os dois para recortar.",13,false),0);
         LinearLayout row=new LinearLayout(this);row.setOrientation(LinearLayout.HORIZONTAL);
-        start=field("Início 00:00:00");end=field("Fim 00:04:00");
+        start=field("00:00:00 (início)");end=field("00:04:00 (fim)");
         start.setInputType(InputType.TYPE_CLASS_TEXT);end.setInputType(InputType.TYPE_CLASS_TEXT);
         LinearLayout.LayoutParams h=new LinearLayout.LayoutParams(0,-2,1);h.rightMargin=dp(5);
         row.addView(start,h);LinearLayout.LayoutParams h2=new LinearLayout.LayoutParams(0,-2,1);h2.leftMargin=dp(5);
@@ -123,6 +124,34 @@ public final class MainActivity extends Activity {
         progress=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);progress.setMax(100);add(root,progress,14);
         status=text("Pronto para começar.",14,false);add(root,status,4);
         result=text("",15,true);add(root,result,1);
+        sessionPanel=new LinearLayout(this);sessionPanel.setOrientation(LinearLayout.VERTICAL);
+        TextView explanation=text("Vídeo com acesso restrito? Você pode importar um arquivo cookies.txt da sua sessão autorizada do YouTube. O arquivo fica somente no armazenamento privado deste aplicativo. Nunca compartilhe cookies com terceiros.",13,false);
+        sessionPanel.addView(explanation);
+        sessionImport=button("Usar minha sessão autorizada (opcional)",MUTED);
+        add(sessionPanel,sessionImport,5);
+        sessionImport.setOnClickListener(v->new android.app.AlertDialog.Builder(this)
+            .setTitle("Acesso autorizado ao YouTube")
+            .setMessage("Selecione um arquivo cookies.txt no formato Netscape, exportado da sua própria conta. Ele contém credenciais sensíveis e ficará armazenado apenas neste aplicativo. Não o compartilhe. O YouTube ainda poderá restringir o download.")
+            .setNegativeButton("Cancelar",null)
+            .setPositiveButton("Selecionar arquivo",(d,w)->chooseSessionFile()).show());
+        sessionClear=button("Apagar sessão salva",MUTED);
+        add(sessionPanel,sessionClear,5);
+        sessionClear.setOnClickListener(v->new android.app.AlertDialog.Builder(this)
+            .setMessage("Apagar definitivamente a sessão autorizada salva neste aplicativo?")
+            .setNegativeButton("Cancelar",null)
+            .setPositiveButton("Apagar",(d,w)->{
+                try { UserSession.clear(this);sessionClear.setVisibility(View.GONE);status.setText("Sessão local apagada."); }
+                catch(Exception e) { status.setText("Falha ao apagar sessão."); }
+            }).show());
+        sessionClear.setVisibility(UserSession.exists(this)?View.VISIBLE:View.GONE);
+        add(root,sessionPanel,12);
+        sessionPanel.setVisibility(UserSession.exists(this)?View.VISIBLE:View.GONE);
+    }
+    void chooseSessionFile() {
+        Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("*/*");
+        startActivityForResult(i,PICK_SESSION);
     }
     void pickFolder(){
         Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
@@ -132,6 +161,18 @@ public final class MainActivity extends Activity {
     }
     @Override protected void onActivityResult(int request,int code,Intent data) {
         super.onActivityResult(request,code,data);
+        if(request==PICK_SESSION && code==RESULT_OK && data!=null) {
+            try {
+                UserSession.importFile(this,data.getData());
+                sessionPanel.setVisibility(View.VISIBLE);
+                sessionClear.setVisibility(View.VISIBLE);
+                status.setText("Sessão autorizada importada. Tentando baixar novamente...");
+                begin();
+            } catch(Exception e) {
+                status.setText("Arquivo não aceito: "+e.getMessage());
+            }
+            return;
+        }
         if(request==PICK && code==RESULT_OK && data!=null){
             Uri chosen=data.getData();
             if(chosen!=null)try {
@@ -162,6 +203,8 @@ public final class MainActivity extends Activity {
                     status.setText(DownloadOutcome.summary(saved,rejected,error,false)
                         +(error==null?"":" "+DownloadOutcome.publicError(error)));
                     result.setText("Arquivos salvos: "+saved+"   |   Falhas: "+rejected);
+                    if(DownloadOutcome.requiresSession(error))
+                        sessionPanel.setVisibility(View.VISIBLE);
                 }
             });
             worker.begin(spec,folder);
