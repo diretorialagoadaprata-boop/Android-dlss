@@ -41,6 +41,10 @@ public final class MainActivity extends Activity {
         String location=getPreferences(MODE_PRIVATE).getString("folder","");
         if(!location.isEmpty()) folder=Uri.parse(location);
         buildUi();
+        new Thread(()->{
+            String problem=JavascriptEngine.check(getApplicationContext());
+            if(problem!=null)android.util.Log.e("LPM_ENGINE","QJS_FAIL "+problem);
+        },"LPM-js-boot-check").start();
         Intent in=getIntent();
         if(Intent.ACTION_SEND.equals(in.getAction()) && "text/plain".equals(in.getType())) {
             String shared=in.getStringExtra(Intent.EXTRA_TEXT);
@@ -177,7 +181,9 @@ public final class MainActivity extends Activity {
         new Thread(()->{
             try{
                 EngineSetup.prepare(getApplicationContext(), m->runOnUiThread(()->status.setText(m)));
-                YoutubeDLRequest req=new YoutubeDLRequest(url);req.addOption("--no-playlist");
+                YoutubeDLRequest req=new YoutubeDLRequest(url);
+                req.addOption("--no-playlist");
+                JavascriptEngine.configure(getApplicationContext(),req,url);
                 Object info=YoutubeDL.getInstance().getInfo(req);
                 Object formats=info.getClass().getMethod("getFormats").invoke(info);
                 Set<Integer> sizes=new HashSet<>();
