@@ -24,6 +24,14 @@ public final class DownloadOutcome {
         String safe=raw.replace('\r',' ').replace('\n',' ').trim();
         return safe.length()>280?safe.substring(0,280):safe;
     }
+    public static boolean requiresSession(String message) {
+        if(message==null)return false;
+        String m=message.toLowerCase(Locale.ROOT);
+        return m.contains("not a bot") || m.contains("sign in to confirm")
+            || m.contains("exige verificação de acesso")
+            || m.contains("requires authentication")
+            || m.contains("exige autenticação");
+    }
     public static String summary(int saved,int rejected,String error,boolean cancelled){
         if(cancelled)return "Processamento cancelado.";
         if(saved==0)return "Download NÃO realizado.";
