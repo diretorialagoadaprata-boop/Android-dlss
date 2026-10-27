@@ -1,0 +1,36 @@
+name: Compile Android QuickJS proof
+on:
+  push:
+    branches: [linkparamidia-test-real-media-20261026]
+    paths: ['.github/workflows/lpm-quickjs-probe.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  quickjs-arm64:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: android-actions/setup-android@v4
+      - name: Android NDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'ndk;27.2.12479018'
+      - name: Cross-compile supported JavaScript runtime
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch v0.17.0 https://github.com/quickjs-ng/quickjs.git /tmp/quickjs-ng
+          cmake -S /tmp/quickjs-ng -B /tmp/quickjs-build -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_HOME/ndk/27.2.12479018/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-26 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_EXE_LINKER_FLAGS="-Wl,-z,max-page-size=16384"
+          cmake --build /tmp/quickjs-build --target qjs -j 2
+          find /tmp/quickjs-build -maxdepth 3 -type f -name qjs -exec ls -lh {} \;
+          file /tmp/quickjs-build/qjs
+          "$ANDROID_HOME/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" -h /tmp/quickjs-build/qjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-arm64-qjs-probe
+          path: /tmp/quickjs-build/qjs
+          retention-days: 5
