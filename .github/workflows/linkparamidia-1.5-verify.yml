@@ -1,0 +1,65 @@
+name: Link para Midia 1.5 - exact APK install & release
+on:
+  push:
+    branches: [linkparamidia-auth-20261026]
+    paths: ['.github/workflows/linkparamidia-1.5-verify.yml']
+  workflow_dispatch:
+permissions:
+  actions: read
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 27
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [google_apis, google_apis_ps16k]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: LinkParaMidia-Android-1.5-Release
+          run-id: 40430661075
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: apk
+      - uses: android-actions/setup-android@v4
+      - name: KVM acceleration
+        run: if [ -e /dev/kvm ]; then sudo chmod 666 /dev/kvm; fi
+      - name: Install exact signed APK and check JavaScript environment
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          arch: x86_64
+          target: ${{ matrix.target }}
+          emulator-boot-timeout: 700
+          emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -memory 2048 -cores 2
+          script: |
+            adb shell getprop ro.build.version.release
+            adb shell getconf PAGE_SIZE
+            adb install -r apk/app-release.apk
+            adb shell pm path br.com.linkparamidia.auth2026
+            adb shell am start -n br.com.linkparamidia.auth2026/br.com.linkparamidia.MainActivity
+            sleep 12
+            adb shell pidof br.com.linkparamidia.auth2026
+            adb logcat -d -v brief | grep 'LPM_ENGINE.*QJS_OK'
+            adb logcat -d -s AndroidRuntime:E | tail -15
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: LinkParaMidia-Android-1.5-Release
+          run-id: 40430661075
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: apk
+      - name: Publish direct APK if both install tests pass
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cp apk/app-release.apk LinkParaMidia_Android_1.5_SESSAO_OPCIONAL.apk
+          test -s LinkParaMidia_Android_1.5_SESSAO_OPCIONAL.apk
+          unzip -t LinkParaMidia_Android_1.5_SESSAO_OPCIONAL.apk | tail -1
+          sha256sum LinkParaMidia_Android_1.5_SESSAO_OPCIONAL.apk
+          gh release create linkparamidia-android-v1.5-session LinkParaMidia_Android_1.5_SESSAO_OPCIONAL.apk --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Link para Midia Android 1.5 - Autorizacao opcional" --notes "Autenticacao opcional com arquivo cookies.txt Netscape guardado no armazenamento privado e apagavel pelo usuario. Download direto sem escolher navegador, com QuickJS EJS. Integridade, assinatura e instalacao em Android 16 4KB/16KB verificadas, testes unitarios de arquivo Netscape aprovados. Download autenticado real do YouTube nao homologado e pode continuar bloqueado." --prerelease
