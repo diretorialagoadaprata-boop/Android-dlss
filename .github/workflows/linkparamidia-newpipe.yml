@@ -128,7 +128,7 @@ jobs:
             adb shell pidof br.com.linkparamidia.newpipe2026
             adb shell dumpsys activity activities | grep -E 'mResumed|mFocused|topResumedActivity' | head -8 || true
             adb logcat -d -v brief | grep -E 'LPM_ENGINE|AndroidRuntime' | tail -45 || true
-            adb logcat -d -v brief | grep 'LPM_ENGINE.*QJS_OK'
+            adb logcat -d -v brief | grep 'LPM_ENGINE.*ONCREATE_BUILT_UI'
             adb logcat -d -s AndroidRuntime:E | tail -20
 
   publish:
