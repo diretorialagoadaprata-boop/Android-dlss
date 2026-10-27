@@ -1,0 +1,148 @@
+name: Link para Midia 1.6 - NewPipe fallback proof
+on:
+  push:
+    branches: [linkparamidia-newpipe-fallback-20261026]
+    paths: ['linkparamidia/**', '.github/workflows/linkparamidia-newpipe.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: SDK packages
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Run unit regression tests (previous full real-media MP3 smoke passed)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/lpm-tests
+          javac -encoding UTF-8 -d /tmp/lpm-tests \
+            linkparamidia/app/src/main/java/br/com/linkparamidia/ClipRules.java \
+            linkparamidia/app/src/main/java/br/com/linkparamidia/DownloadOutcome.java \
+            linkparamidia/app/src/main/java/br/com/linkparamidia/CookieRules.java \
+            linkparamidia/tests/ClipRulesTest.java \
+            linkparamidia/tests/DownloadOutcomeTest.java \
+            linkparamidia/tests/CookieRulesTest.java
+          java -cp /tmp/lpm-tests br.com.linkparamidia.ClipRulesTest
+          java -cp /tmp/lpm-tests br.com.linkparamidia.DownloadOutcomeTest
+          java -cp /tmp/lpm-tests br.com.linkparamidia.CookieRulesTest
+      - name: Generate release signing key
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/lpm"
+          pw="$(openssl rand -hex 24)"
+          echo "::add-mask::$pw"
+          echo "LPM_STORE_PASSWORD=$pw" >> "$GITHUB_ENV"
+          echo "LPM_KEY_PASSWORD=$pw" >> "$GITHUB_ENV"
+          echo "LPM_KEY_ALIAS=linkparamidia" >> "$GITHUB_ENV"
+          echo "LPM_KEYSTORE_PATH=$RUNNER_TEMP/lpm/release.jks" >> "$GITHUB_ENV"
+          keytool -genkeypair -keystore "$RUNNER_TEMP/lpm/release.jks" -alias linkparamidia -keyalg RSA -keysize 3072 -validity 3650 -storepass "$pw" -keypass "$pw" -dname 'CN=Link para Midia, OU=Android, O=Link para Midia, C=BR' -noprompt
+      - name: Compile Android QuickJS-NG executable and package as native library
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'ndk;27.2.12479018'
+          git clone --depth 1 --branch v0.17.0 https://github.com/quickjs-ng/quickjs.git /tmp/quickjs-ng
+          cmake -S /tmp/quickjs-ng -B /tmp/quickjs-build -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_HOME/ndk/27.2.12479018/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-26 \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXE_LINKER_FLAGS="-Wl,-z,max-page-size=16384"
+          cmake --build /tmp/quickjs-build --target qjs -j 2
+          "$ANDROID_HOME/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" /tmp/quickjs-build/qjs
+          mkdir -p linkparamidia/app/src/main/jniLibs/arm64-v8a
+          install -m755 /tmp/quickjs-build/qjs linkparamidia/app/src/main/jniLibs/arm64-v8a/libqjs.so
+          file linkparamidia/app/src/main/jniLibs/arm64-v8a/libqjs.so
+      - name: Assemble genuine release APK
+        run: gradle --no-daemon -p linkparamidia :app:assembleRelease --stacktrace
+      - name: Inspect signature and manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=linkparamidia/app/build/outputs/apk/release/app-release.apk
+          test -s "$APK"
+          unzip -t "$APK" | tail -1
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | tee "$RUNNER_TEMP/badging.txt"
+          grep "package: name='br.com.linkparamidia.newpipe2026'" "$RUNNER_TEMP/badging.txt"
+          grep "launchable-activity: name='br.com.linkparamidia.MainActivity'" "$RUNNER_TEMP/badging.txt"
+          if grep -q application-debuggable "$RUNNER_TEMP/badging.txt"; then exit 1; fi
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" | tee "$RUNNER_TEMP/sig.txt"
+          grep "Verified using v2 scheme.*true" "$RUNNER_TEMP/sig.txt"
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 4 "$APK"
+          unzip -Z1 "$APK" | grep -Fx 'lib/arm64-v8a/libffmpeg.so'
+          unzip -Z1 "$APK" | grep -Fx 'lib/arm64-v8a/libqjs.so'
+          sha256sum "$APK"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LinkParaMidia-Android-1.6-Release
+          path: linkparamidia/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+          retention-days: 30
+
+  emulator:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [google_apis, google_apis_ps16k]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: LinkParaMidia-Android-1.6-Release
+          path: apk
+      - uses: android-actions/setup-android@v4
+      - name: KVM
+        run: if [ -e /dev/kvm ]; then sudo chmod 666 /dev/kvm; fi
+      - name: Install exact RELEASE APK and launch on Android 16
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          arch: x86_64
+          target: ${{ matrix.target }}
+          emulator-boot-timeout: 650
+          emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -memory 2048 -cores 2
+          script: |
+            adb shell getprop ro.build.version.release
+            adb shell getconf PAGE_SIZE
+            adb install -r apk/app-release.apk
+            adb shell pm path br.com.linkparamidia.newpipe2026
+            adb shell am start -n br.com.linkparamidia.newpipe2026/br.com.linkparamidia.MainActivity
+            sleep 20
+            adb shell pidof br.com.linkparamidia.newpipe2026
+            adb shell dumpsys activity activities | grep -E 'mResumed|mFocused|topResumedActivity' | head -8 || true
+            adb logcat -d -v brief | grep -E 'LPM_ENGINE|AndroidRuntime' | tail -45 || true
+            adb logcat -d -v brief | grep 'LPM_ENGINE.*QJS_OK'
+            adb logcat -d -s AndroidRuntime:E | tail -20
+
+  publish:
+    needs: [build, emulator]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: LinkParaMidia-Android-1.6-Release
+          path: apk
+      - name: Publish direct APK (only if emulators passed)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cp apk/app-release.apk LinkParaMidia_Android_1.6_ARM64_RELEASE.apk
+          gh release create linkparamidia-android-v1.6-newpipe LinkParaMidia_Android_1.6_ARM64_RELEASE.apk --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Link para Midia Android 1.6 - NewPipe fallback" --notes "APK ARM64 com NewPipeExtractor GPLv3 como segunda tentativa de extracao, apos yt-dlp, sem API paga. Bibliotecas locais para conversao MP3 e MP4. Testes de instalacao e extrator ainda nao garantem download real do YouTube nem eliminam bloqueios de acesso. Codigo e licenca GPLv3 disponiveis no branch linkparamidia-newpipe-fallback-20261026." --prerelease
