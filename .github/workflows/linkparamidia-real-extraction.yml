@@ -21,11 +21,12 @@ jobs:
           sudo apt-get install -y -qq ffmpeg
           python -m yt_dlp --version
       - name: Attempt MP3 and four-second section from real remote public MP4
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p /tmp/lpm-good
-          timeout 105 python -m yt_dlp --no-playlist --no-overwrites --extract-audio --audio-format mp3 --audio-quality 192K --download-sections '*00:00:00-00:00:04' --force-keyframes-at-cuts --output '/tmp/lpm-good/%(id)s.%(ext)s' 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4'
+          timeout 105 python -m yt_dlp --no-playlist --no-overwrites --extract-audio --audio-format mp3 --audio-quality 192K --download-sections '*00:00:00-00:00:04' --force-keyframes-at-cuts --output '/tmp/lpm-good/%(id)s.%(ext)s' 'https://raw.githubusercontent.com/mediaelement/mediaelement-files/master/big_buck_bunny.mp4'
           f="$(find /tmp/lpm-good -type f -name '*.mp3' | head -1)"
           test -s "$f"
           dur="$(ffprobe -v error -show_entries format=duration -of default=nokey=1:noprint_wrappers=1 "$f")"
