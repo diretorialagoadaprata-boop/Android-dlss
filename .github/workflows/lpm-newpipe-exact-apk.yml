@@ -1,0 +1,66 @@
+name: Link para Midia 1.6 - verify EXACT APK 4K and 16K
+on:
+  push:
+    branches: [linkparamidia-newpipe-fallback-20261026]
+    paths: ['.github/workflows/lpm-newpipe-exact-apk.yml']
+  workflow_dispatch:
+permissions:
+  actions: read
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [google_apis, google_apis_ps16k]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: LinkParaMidia-Android-1.6-Release
+          run-id: 40436735741
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: apk
+      - uses: android-actions/setup-android@v4
+      - name: KVM
+        run: if [ -e /dev/kvm ]; then sudo chmod 666 /dev/kvm; fi
+      - name: Install and verify JavaScript + lifecycle, show logs on failure
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          arch: x86_64
+          target: ${{ matrix.target }}
+          emulator-boot-timeout: 700
+          emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -memory 2048 -cores 2
+          script: |
+            adb shell getconf PAGE_SIZE
+            adb install -r apk/app-release.apk
+            adb shell pm path br.com.linkparamidia.newpipe2026
+            adb logcat -c
+            adb shell am start -n br.com.linkparamidia.newpipe2026/br.com.linkparamidia.MainActivity
+            sleep 25
+            adb logcat -d -v brief | grep -E 'LPM_ENGINE|AndroidRuntime|FATAL EXCEPTION|Fatal signal|UnsatisfiedLinkError' | tail -45 || true
+            adb shell dumpsys activity activities | grep -E 'topResumedActivity|mFocusedWindow' | head -5 || true
+            adb shell pidof br.com.linkparamidia.newpipe2026
+            adb logcat -d -v brief | grep 'LPM_ENGINE.*QJS_OK'
+            adb logcat -d -s AndroidRuntime:E | tail -15
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: LinkParaMidia-Android-1.6-Release
+          run-id: 40436735741
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: apk
+      - name: Publish exact signed APK after both emulator checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cp apk/app-release.apk LinkParaMidia_Android_1.6_NewPipe_Experimental.apk
+          unzip -t LinkParaMidia_Android_1.6_NewPipe_Experimental.apk | tail -1
+          sha256sum LinkParaMidia_Android_1.6_NewPipe_Experimental.apk
+          gh release create linkparamidia-android-v1.6-newpipe LinkParaMidia_Android_1.6_NewPipe_Experimental.apk --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Link para Midia Android 1.6 - NewPipe gratuito (experimental)" --notes "APK de testes funcional com fallback gratuito NewPipeExtractor GPLv3 (fonte no branch linkparamidia-newpipe-fallback-20261026). 4K/16K Android 16 install and quickJS boot verified. YouTube pode bloquear acesso; NAO foi homologada extracao real do video do usuario. O uso de audio e video requer autorizacao do titular." --prerelease
